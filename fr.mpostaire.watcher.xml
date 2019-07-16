@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<node name="/" xmlns:doc="http://www.freedesktop.org/dbus/1.0/doc.dtd">
+    <interface name="fr.mpostaire.Watcher">
+        <method name="SetBrightness">
+            <arg name="value" type="u" direction="in" />
+        </method>
+        <method name="IncBrightness">
+            <arg name="value" type="u" direction="in" />
+        </method>
+        <method name="DecBrightness">
+            <arg name="value" type="u" direction="in" />
+        </method>
+        <property name="Percentage" type="u" access="read" />
+        <property name="MinPercentage" type="u" access="read" />
+    </interface>
+</node>
