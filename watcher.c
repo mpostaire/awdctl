@@ -258,6 +258,7 @@ int main(int argc, char **argv) {
     g_main_loop_run(ws);
 
     g_object_unref(file);
+    g_main_loop_unref(ws);
 
     return EXIT_SUCCESS;
 }
