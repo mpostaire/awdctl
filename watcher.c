@@ -17,17 +17,20 @@
 #include "watcher-dbus.h"
 
 #define MIN_BRIGHTNESS_PERCENT 10
+#define BRIGHTNESS_PATH "/sys/class/backlight/radeon_bl0/brightness"
+#define MAX_BRIGHTNESS_PATH "/sys/class/backlight/radeon_bl0/max_brightness"
 
-Watcher *skeleton;
+WatcherBrightness *brightness_skeleton;
+WatcherVolume *volume_skeleton;
 GFile *file;
 guint max_brightness;
 
-guint get_max_brightness() {
+static guint read_brightness(char *path) {
     GError *err = NULL;
 
-    gchar *contents;
+    char *contents;
     gsize length;
-    if (!g_file_get_contents("/sys/class/backlight/radeon_bl0/max_brightness", &contents, &length, &err)) {
+    if (!g_file_get_contents(path, &contents, &length, &err)) {
         char *fpath = g_file_get_path(file);
         fprintf(stderr, "unable to read %s: %s\n", fpath, err->message);
         g_free(fpath);
@@ -40,25 +43,7 @@ guint get_max_brightness() {
     return temp;
 }
 
-guint read_brightness() {
-    GError *err = NULL;
-
-    gchar *contents;
-    gsize length;
-    if (!g_file_get_contents("/sys/class/backlight/radeon_bl0/brightness", &contents, &length, &err)) {
-        char *fpath = g_file_get_path(file);
-        fprintf(stderr, "unable to read %s: %s\n", fpath, err->message);
-        g_free(fpath);
-        g_error_free(err);
-        exit(EXIT_FAILURE);
-    }
-
-    guint temp = atoi(contents);
-    g_free(contents);
-    return temp;
-}
-
-void write_brightness(guint value) {
+static void write_brightness(guint value) {
     GError *err = NULL;
     GFileOutputStream *stream = g_file_replace(file, NULL, FALSE, G_FILE_CREATE_NONE, NULL, &err);
     if (err) {
@@ -99,8 +84,8 @@ static void file_changed_cb(GFileMonitor *monitor, GFile *file, GFile *other, GF
         break;
     case G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT:
         g_print("%s set of changes done\n", fpath);
-        guint brightness = read_brightness(file);
-        watcher_set_percentage(skeleton, (gfloat) brightness / max_brightness * 100);
+        guint brightness = read_brightness(BRIGHTNESS_PATH);
+        watcher_brightness_set_percentage(brightness_skeleton, (gfloat) brightness / max_brightness * 100);
         printf("brightness = %d\n", brightness);
         break;
     case G_FILE_MONITOR_EVENT_DELETED:
@@ -131,9 +116,9 @@ static void file_changed_cb(GFileMonitor *monitor, GFile *file, GFile *other, GF
     g_free(fpath);
 }
 
-void start_monitoring() {
+static void start_brightness_monitoring() {
     // TODO: make a smart detection of the path
-    file = g_file_new_for_path("/sys/class/backlight/radeon_bl0/brightness");
+    file = g_file_new_for_path(BRIGHTNESS_PATH);
     assert(file);
 
     GError *err = NULL;
@@ -153,98 +138,127 @@ void start_monitoring() {
     g_free(fpath);
 
     // update initial brightness properties
-    guint brightness = read_brightness();
-    max_brightness = get_max_brightness();
+    guint brightness = read_brightness(BRIGHTNESS_PATH);
+    max_brightness = read_brightness(MAX_BRIGHTNESS_PATH);
     guint min_brightness = MIN_BRIGHTNESS_PERCENT / 100.0 * max_brightness;
-    watcher_set_percentage(skeleton, (gfloat) brightness / max_brightness * 100);
-    watcher_set_min_percentage(skeleton, MIN_BRIGHTNESS_PERCENT);
+    watcher_brightness_set_percentage(brightness_skeleton, (gfloat) brightness / max_brightness * 100);
+    watcher_brightness_set_min_percentage(brightness_skeleton, MIN_BRIGHTNESS_PERCENT);
     printf("brightness = %d\n", brightness);
     printf("max brightness = %d\n", max_brightness);
     printf("min brightness = %d\n", min_brightness);
 }
 
-static void on_handle_set_brightness(Watcher *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
+static void on_handle_set_brightness(WatcherBrightness *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
     if (value < MIN_BRIGHTNESS_PERCENT || value > 100) {
         g_dbus_method_invocation_return_error_literal(invocation, G_IO_ERROR, G_IO_ERROR_EXISTS, "input must be in interval: [MinPercentage, 100]");
         return;
     }
 
-    guint current_value = watcher_get_percentage(skeleton);
+    guint current_value = watcher_brightness_get_percentage(skeleton);
     if (value == current_value) {
-        watcher_complete_set_brightness(skeleton, invocation);
+        watcher_brightness_complete_set_brightness(skeleton, invocation);
         return;
     }
 
-    watcher_set_percentage(skeleton, value);
+    watcher_brightness_set_percentage(skeleton, value);
 
     guint true_value = ceil(value / 100.0 * max_brightness);
     write_brightness(true_value);
     printf("brightness set to %d\n", true_value);
 
-    watcher_complete_set_brightness(skeleton, invocation);
+    watcher_brightness_complete_set_brightness(skeleton, invocation);
 }
 
-static void on_handle_inc_brightness(Watcher *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
+static void on_handle_inc_brightness(WatcherBrightness *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
     if (value <= 0) {
-        watcher_complete_inc_brightness(skeleton, invocation);
+        watcher_brightness_complete_inc_brightness(skeleton, invocation);
         return;
     }
 
-    guint current_value = watcher_get_percentage(skeleton);
+    guint current_value = watcher_brightness_get_percentage(skeleton);
     guint target_value = current_value + value;
     if (target_value > 100)
         target_value = 100;
 
     if (target_value == current_value) {
-        watcher_complete_inc_brightness(skeleton, invocation);
+        watcher_brightness_complete_inc_brightness(skeleton, invocation);
         return;
     }
 
-    watcher_set_percentage(skeleton, target_value);
+    watcher_brightness_set_percentage(skeleton, target_value);
     guint true_value = ceil(target_value / 100.0 * max_brightness);
     write_brightness(true_value);
     printf("brightness set to %d\n", true_value);
 
-    watcher_complete_inc_brightness(skeleton, invocation);
+    watcher_brightness_complete_inc_brightness(skeleton, invocation);
 }
 
-static void on_handle_dec_brightness(Watcher *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
+static void on_handle_dec_brightness(WatcherBrightness *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
     if (value <= 0) {
-        watcher_complete_dec_brightness(skeleton, invocation);
+        watcher_brightness_complete_dec_brightness(skeleton, invocation);
         return;
     }
 
-    guint current_value = watcher_get_percentage(skeleton);
+    guint current_value = watcher_brightness_get_percentage(skeleton);
     gint target_value = current_value - value;
     if (target_value < MIN_BRIGHTNESS_PERCENT)
         target_value = MIN_BRIGHTNESS_PERCENT;
     
     if (target_value == current_value) {
-        watcher_complete_dec_brightness(skeleton, invocation);
+        watcher_brightness_complete_dec_brightness(skeleton, invocation);
         return;
     }
 
-    watcher_set_percentage(skeleton, target_value);
+    watcher_brightness_set_percentage(skeleton, target_value);
     guint true_value = ceil(target_value / 100.0 * max_brightness);
     write_brightness(true_value);
     printf("brightness set to %d\n", true_value);
 
-    watcher_complete_dec_brightness(skeleton, invocation);
+    watcher_brightness_complete_dec_brightness(skeleton, invocation);
+}
+
+static void start_volume_monitoring() {
+    printf("start_volume_monitoring\n");
+}
+
+static void on_handle_set_volume(WatcherVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
+    printf("on_handle_set_volume\n");
+}
+
+static void on_handle_inc_volume(WatcherVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
+    printf("on_handle_inc_volume\n");
+}
+
+static void on_handle_dec_volume(WatcherVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
+    printf("on_handle_dec_volume\n");
 }
 
 static void on_name_acquired(GDBusConnection *connection, const gchar *name, gpointer user_data) {
-    skeleton = watcher_skeleton_new();
+    // TODO: add eror handling for all lines where it is possible
+    
+    // setup brightness interface
+    brightness_skeleton = watcher_brightness_skeleton_new();
 
-    g_signal_connect(skeleton, "handle-set-brightness", G_CALLBACK(on_handle_set_brightness), NULL);
-    g_signal_connect(skeleton, "handle-inc-brightness", G_CALLBACK(on_handle_inc_brightness), NULL);
-    g_signal_connect(skeleton, "handle-dec-brightness", G_CALLBACK(on_handle_dec_brightness), NULL);
+    g_signal_connect(brightness_skeleton, "handle-set-brightness", G_CALLBACK(on_handle_set_brightness), NULL);
+    g_signal_connect(brightness_skeleton, "handle-inc-brightness", G_CALLBACK(on_handle_inc_brightness), NULL);
+    g_signal_connect(brightness_skeleton, "handle-dec-brightness", G_CALLBACK(on_handle_dec_brightness), NULL);
 
-    // add error handling for this line
-    g_dbus_interface_skeleton_export(G_DBUS_INTERFACE_SKELETON(skeleton), connection,
-                                     "/fr/mpostaire/Watcher", NULL);
+    g_dbus_interface_skeleton_export(G_DBUS_INTERFACE_SKELETON(brightness_skeleton), connection,
+                                     "/fr/mpostaire/Watcher/Brightness", NULL);
+    // we can begin to monitor brightness
+    start_brightness_monitoring();
 
-    // if name acquired we can begin to monitor brightness
-    start_monitoring();
+    // setup volume interface
+    volume_skeleton = watcher_volume_skeleton_new();
+
+    g_signal_connect(volume_skeleton, "handle-set-volume", G_CALLBACK(on_handle_set_volume), NULL);
+    g_signal_connect(volume_skeleton, "handle-inc-volume", G_CALLBACK(on_handle_inc_volume), NULL);
+    g_signal_connect(volume_skeleton, "handle-dec-volume", G_CALLBACK(on_handle_dec_volume), NULL);
+
+    g_dbus_interface_skeleton_export(G_DBUS_INTERFACE_SKELETON(volume_skeleton), connection,
+                                     "/fr/mpostaire/Watcher/Volume", NULL);
+    // we can begin to monitor volume
+    start_volume_monitoring();
 }
 
 int main(int argc, char **argv) {

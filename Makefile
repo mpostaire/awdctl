@@ -14,8 +14,8 @@ $(EXEC)-dbus.o: $(EXEC)-dbus.c $(EXEC)-dbus.h
 run: all
 	./$(EXEC)
 
-gen: fr.mpostaire.watcher.xml
-	gdbus-codegen --interface-prefix com.watcher --interface-prefix fr.mpostaire. --generate-c-code $(EXEC)-dbus fr.mpostaire.watcher.xml
+gen: fr.mpostaire.Watcher.xml
+	gdbus-codegen --interface-prefix fr.mpostaire. --generate-c-code $(EXEC)-dbus fr.mpostaire.Watcher.xml
 
 clean:
 	rm -rf *.o
