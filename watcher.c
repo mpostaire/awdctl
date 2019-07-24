@@ -3,8 +3,10 @@
  * TODO: refactor if needed
  * TODO: check corner cases
  * TODO: auto (backlight sysfs) path detection
- * TODO: power saving features (timers to dim screen, etc...). Only do this if no alternatives.
- * 
+ * TODO: power saving features (timers to dim screen, etc...). Only do this if no alternatives. (check acpi)
+ * TODO: use user_data args to get rid of global variables
+ * TODO: break in smaller files
+ * TODO: memory leak check
  * 
  * can add more interfaces to monitor more things in the future
  */
@@ -14,14 +16,17 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <math.h>
+#include <alsa/asoundlib.h>
 #include "watcher-dbus.h"
 
 #define MIN_BRIGHTNESS_PERCENT 10
 #define BRIGHTNESS_PATH "/sys/class/backlight/radeon_bl0/brightness"
 #define MAX_BRIGHTNESS_PATH "/sys/class/backlight/radeon_bl0/max_brightness"
 
-WatcherBrightness *brightness_skeleton;
 WatcherVolume *volume_skeleton;
+struct pollfd pfd;
+
+WatcherBrightness *brightness_skeleton;
 GFile *file;
 guint max_brightness;
 
@@ -151,6 +156,7 @@ static void start_brightness_monitoring() {
 static void on_handle_set_brightness(WatcherBrightness *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
     if (value < MIN_BRIGHTNESS_PERCENT || value > 100) {
         g_dbus_method_invocation_return_error_literal(invocation, G_IO_ERROR, G_IO_ERROR_EXISTS, "input must be in interval: [MinPercentage, 100]");
+        watcher_brightness_complete_set_brightness(skeleton, invocation);
         return;
     }
 
@@ -159,8 +165,6 @@ static void on_handle_set_brightness(WatcherBrightness *skeleton, GDBusMethodInv
         watcher_brightness_complete_set_brightness(skeleton, invocation);
         return;
     }
-
-    watcher_brightness_set_percentage(skeleton, value);
 
     guint true_value = ceil(value / 100.0 * max_brightness);
     write_brightness(true_value);
@@ -185,7 +189,6 @@ static void on_handle_inc_brightness(WatcherBrightness *skeleton, GDBusMethodInv
         return;
     }
 
-    watcher_brightness_set_percentage(skeleton, target_value);
     guint true_value = ceil(target_value / 100.0 * max_brightness);
     write_brightness(true_value);
     printf("brightness set to %d\n", true_value);
@@ -209,7 +212,6 @@ static void on_handle_dec_brightness(WatcherBrightness *skeleton, GDBusMethodInv
         return;
     }
 
-    watcher_brightness_set_percentage(skeleton, target_value);
     guint true_value = ceil(target_value / 100.0 * max_brightness);
     write_brightness(true_value);
     printf("brightness set to %d\n", true_value);
@@ -217,20 +219,230 @@ static void on_handle_dec_brightness(WatcherBrightness *skeleton, GDBusMethodInv
     watcher_brightness_complete_dec_brightness(skeleton, invocation);
 }
 
+long alsa_get_volume() {
+    long min, max, vol;
+    snd_mixer_t *handle;
+    snd_mixer_selem_id_t *sid;
+    const char *card = "default";
+    const char *selem_name = "Master";
+
+    snd_mixer_open(&handle, 0);
+    snd_mixer_attach(handle, card);
+    snd_mixer_selem_register(handle, NULL, NULL);
+    snd_mixer_load(handle);
+
+    snd_mixer_selem_id_alloca(&sid);
+    snd_mixer_selem_id_set_index(sid, 0);
+    snd_mixer_selem_id_set_name(sid, selem_name);
+    snd_mixer_elem_t* elem = snd_mixer_find_selem(handle, sid);
+
+    snd_mixer_selem_get_playback_volume_range(elem, &min, &max);
+    snd_mixer_selem_get_playback_volume(elem, SND_MIXER_SCHN_MONO, &vol);
+
+    return floor((gdouble) vol / max * 100);
+}
+
+void alsa_set_volume(guint volume) {
+    long min, max;
+    snd_mixer_t *handle;
+    snd_mixer_selem_id_t *sid;
+    const char *card = "default";
+    const char *selem_name = "Master";
+
+    snd_mixer_open(&handle, 0);
+    snd_mixer_attach(handle, card);
+    snd_mixer_selem_register(handle, NULL, NULL);
+    snd_mixer_load(handle);
+
+    snd_mixer_selem_id_alloca(&sid);
+    snd_mixer_selem_id_set_index(sid, 0);
+    snd_mixer_selem_id_set_name(sid, selem_name);
+    snd_mixer_elem_t *elem = snd_mixer_find_selem(handle, sid);
+
+    snd_mixer_selem_get_playback_volume_range(elem, &min, &max);
+    snd_mixer_selem_set_playback_volume_all(elem, volume * max / 100);
+
+    snd_mixer_close(handle);
+}
+
+gboolean alsa_get_muted() {
+    snd_mixer_t *handle;
+    snd_mixer_selem_id_t *sid;
+    const char *card = "default";
+    const char *selem_name = "Master";
+
+    snd_mixer_open(&handle, 0);
+    snd_mixer_attach(handle, card);
+    snd_mixer_selem_register(handle, NULL, NULL);
+    snd_mixer_load(handle);
+
+    snd_mixer_selem_id_alloca(&sid);
+    snd_mixer_selem_id_set_index(sid, 0);
+    snd_mixer_selem_id_set_name(sid, selem_name);
+    snd_mixer_elem_t* elem = snd_mixer_find_selem(handle, sid);
+
+    if (snd_mixer_selem_has_playback_switch(elem)) {
+        int val;
+        snd_mixer_selem_get_playback_switch(elem, SND_MIXER_SCHN_MONO, &val);
+        if (val)
+            return FALSE;
+        else
+            return TRUE;
+    }
+}
+
+void alsa_toggle_volume() {
+    snd_mixer_t *handle;
+    snd_mixer_selem_id_t *sid;
+    const char *card = "default";
+    const char *selem_name = "Master";
+
+    snd_mixer_open(&handle, 0);
+    snd_mixer_attach(handle, card);
+    snd_mixer_selem_register(handle, NULL, NULL);
+    snd_mixer_load(handle);
+
+    snd_mixer_selem_id_alloca(&sid);
+    snd_mixer_selem_id_set_index(sid, 0);
+    snd_mixer_selem_id_set_name(sid, selem_name);
+    snd_mixer_elem_t* elem = snd_mixer_find_selem(handle, sid);
+
+    if (snd_mixer_selem_has_playback_switch(elem)) {
+        int val;
+        snd_mixer_selem_get_playback_switch(elem, SND_MIXER_SCHN_MONO, &val);
+        if (val)
+            snd_mixer_selem_set_playback_switch_all(elem, 0);
+        else
+            snd_mixer_selem_set_playback_switch_all(elem, 1);
+    }
+
+    snd_mixer_close(handle);
+}
+
+gboolean check_audio_event(GIOChannel *source, GIOCondition condition, gpointer data) {
+    snd_ctl_t *ctl = (snd_ctl_t *) data;
+    snd_ctl_event_t *event;
+    unsigned int mask;
+    int err;
+
+    snd_ctl_event_alloca(&event);
+    err = snd_ctl_read(ctl, event);
+    if (err < 0)
+        exit(EXIT_FAILURE); // maybe better if we just ignore with return TRUE
+
+    if (snd_ctl_event_get_type(event) != SND_CTL_EVENT_ELEM)
+        return TRUE;
+    
+    mask = snd_ctl_event_elem_get_mask(event);
+    if (!(mask & SND_CTL_EVENT_MASK_VALUE))
+        return TRUE;
+
+    watcher_volume_set_percentage(volume_skeleton, alsa_get_volume());
+    watcher_volume_set_muted(volume_skeleton, alsa_get_muted());
+    printf("alsa event received\n");
+
+    return TRUE;
+}
+
+int open_ctl(const char *name, snd_ctl_t **ctlp) {
+    snd_ctl_t *ctl;
+    int err;
+
+    err = snd_ctl_open(&ctl, name, SND_CTL_READONLY);
+    if (err < 0) {
+        fprintf(stderr, "Cannot open ctl %s\n", name);
+        return err;
+    }
+    err = snd_ctl_subscribe_events(ctl, 1);
+    if (err < 0) {
+        fprintf(stderr, "Cannot open subscribe events to ctl %s\n", name);
+        snd_ctl_close(ctl);
+        return err;
+    }
+    *ctlp = ctl;
+    return 0;
+}
+
 static void start_volume_monitoring() {
-    printf("start_volume_monitoring\n");
+    snd_ctl_t *ctl;
+    int err = 0;
+
+    err = open_ctl("default", &ctl);
+    if (err < 0) {
+        snd_ctl_close(ctl);
+        exit(EXIT_FAILURE);
+    }
+    
+    snd_ctl_poll_descriptors(ctl, &pfd, 1);
+
+    GIOChannel *channel = g_io_channel_unix_new((&pfd)->fd);
+    g_io_add_watch(channel, G_IO_IN, check_audio_event, ctl);
+
+    g_print("monitoring alsa\n");
+
+    watcher_volume_set_percentage(volume_skeleton, alsa_get_volume());
 }
 
 static void on_handle_set_volume(WatcherVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
-    printf("on_handle_set_volume\n");
+    if (value < 0 || value > 100) {
+        g_dbus_method_invocation_return_error_literal(invocation, G_IO_ERROR, G_IO_ERROR_EXISTS, "input must be in interval: [MinPercentage, 100]");
+        watcher_volume_complete_set_volume(skeleton, invocation);
+        return;
+    }
+
+    alsa_set_volume(value);
+    printf("audio volume set to %d\n", value);
+
+    watcher_volume_complete_set_volume(skeleton, invocation);
 }
 
 static void on_handle_inc_volume(WatcherVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
-    printf("on_handle_inc_volume\n");
+    if (value <= 0) {
+        watcher_volume_complete_inc_volume(skeleton, invocation);
+        return;
+    }
+
+    guint current_value = watcher_volume_get_percentage(skeleton);
+    guint target_value = current_value + value;
+    if (target_value > 100)
+        target_value = 100;
+
+    if (target_value == current_value) {
+        watcher_volume_complete_inc_volume(skeleton, invocation);
+        return;
+    }
+
+    alsa_set_volume(target_value);
+    printf("audio volume set to %d\n", target_value);
+    
+    watcher_volume_complete_inc_volume(skeleton, invocation);
 }
 
 static void on_handle_dec_volume(WatcherVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
-    printf("on_handle_dec_volume\n");
+    if (value <= 0) {
+        watcher_volume_complete_dec_volume(skeleton, invocation);
+        return;
+    }
+
+    guint current_value = watcher_volume_get_percentage(skeleton);
+    gint target_value = current_value - value;
+    if (target_value < 0)
+        target_value = 0;
+    
+    if (target_value == current_value) {
+        watcher_volume_complete_dec_volume(skeleton, invocation);
+        return;
+    }
+
+    alsa_set_volume(target_value);
+    printf("audio volume set to %d\n", target_value);
+
+    watcher_volume_complete_dec_volume(skeleton, invocation);
+}
+
+static void on_handle_toggle_volume(WatcherVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
+    alsa_toggle_volume();
+    watcher_volume_complete_toggle_volume(skeleton, invocation);
 }
 
 static void on_name_acquired(GDBusConnection *connection, const gchar *name, gpointer user_data) {
@@ -245,6 +457,7 @@ static void on_name_acquired(GDBusConnection *connection, const gchar *name, gpo
 
     g_dbus_interface_skeleton_export(G_DBUS_INTERFACE_SKELETON(brightness_skeleton), connection,
                                      "/fr/mpostaire/Watcher/Brightness", NULL);
+
     // we can begin to monitor brightness
     start_brightness_monitoring();
 
@@ -254,6 +467,7 @@ static void on_name_acquired(GDBusConnection *connection, const gchar *name, gpo
     g_signal_connect(volume_skeleton, "handle-set-volume", G_CALLBACK(on_handle_set_volume), NULL);
     g_signal_connect(volume_skeleton, "handle-inc-volume", G_CALLBACK(on_handle_inc_volume), NULL);
     g_signal_connect(volume_skeleton, "handle-dec-volume", G_CALLBACK(on_handle_dec_volume), NULL);
+    g_signal_connect(volume_skeleton, "handle-toggle-volume", G_CALLBACK(on_handle_toggle_volume), NULL);
 
     g_dbus_interface_skeleton_export(G_DBUS_INTERFACE_SKELETON(volume_skeleton), connection,
                                      "/fr/mpostaire/Watcher/Volume", NULL);
@@ -261,18 +475,23 @@ static void on_name_acquired(GDBusConnection *connection, const gchar *name, gpo
     start_volume_monitoring();
 }
 
+static void on_name_lost(GDBusConnection *connection, const gchar *name, gpointer user_data) {
+    fprintf(stderr, "Connection lost or already owned.\n");
+    exit(EXIT_FAILURE);
+}
+
 int main(int argc, char **argv) {
-    GMainLoop *ws = g_main_loop_new(NULL, FALSE);
-    assert(ws);
+    GMainLoop *loop = g_main_loop_new(NULL, FALSE);
+    assert(loop);
 
     // change to SESSION bus
     g_bus_own_name(G_BUS_TYPE_SESSION, "fr.mpostaire.Watcher", G_BUS_NAME_OWNER_FLAGS_NONE, NULL,
-                   on_name_acquired, NULL, NULL, NULL);
+                   on_name_acquired, on_name_lost, NULL, NULL);
 
-    g_main_loop_run(ws);
+    g_main_loop_run(loop);
 
     g_object_unref(file);
-    g_main_loop_unref(ws);
+    g_main_loop_unref(loop);
 
     return EXIT_SUCCESS;
 }

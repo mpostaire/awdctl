@@ -23,6 +23,8 @@
         <method name="DecVolume">
             <arg name="value" type="u" direction="in" />
         </method>
+        <method name="ToggleVolume" />
         <property name="Percentage" type="u" access="read" />
+        <property name="Muted" type="b" access="read" />
     </interface>
 </node>
