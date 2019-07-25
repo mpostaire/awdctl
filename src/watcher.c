@@ -1,11 +1,9 @@
 /*
  * TODO: daemonize this
- * TODO: refactor if needed
  * TODO: check corner cases
- * TODO: auto (backlight sysfs) path detection
+ * TODO: check for errors return values where its possible
  * TODO: power saving features (timers to dim screen, etc...). Only do this if no alternatives. (check acpi)
- * TODO: use user_data args to get rid of global variables
- * TODO: break in smaller files
+ * TODO: ---> use user_data args to get rid of global variables
  * TODO: memory leak check
  * 
  * can add more interfaces to monitor more things in the future
