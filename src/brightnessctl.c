@@ -20,6 +20,7 @@ void get_backlight_sysfs_path(char *brightness_path, char *max_brightness_path) 
     sprintf(max_brightness_path, "/sys/class/backlight/%s/max_brightness", name);
 
     g_file_enumerator_close(enumerator, NULL, NULL);
+    g_object_unref(enumerator);
 }
 
 guint get_max_brightness() { return max_brightness; }

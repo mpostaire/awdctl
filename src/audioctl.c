@@ -3,7 +3,10 @@
 #include <glib.h>
 #include <stdlib.h>
 
-static WatcherVolume *skeleton;
+struct data {
+    snd_ctl_t *ctl;
+    WatcherVolume *skeleton;
+};
 
 long alsa_get_volume() {
     long min, max, vol;
@@ -24,6 +27,8 @@ long alsa_get_volume() {
 
     snd_mixer_selem_get_playback_volume_range(elem, &min, &max);
     snd_mixer_selem_get_playback_volume(elem, SND_MIXER_SCHN_MONO, &vol);
+
+    snd_mixer_close(handle);
 
     return (gfloat) vol / max * 100;
 }
@@ -70,11 +75,16 @@ gboolean alsa_get_muted() {
     if (snd_mixer_selem_has_playback_switch(elem)) {
         int val;
         snd_mixer_selem_get_playback_switch(elem, SND_MIXER_SCHN_MONO, &val);
-        if (val)
+        if (val) {
+            snd_mixer_close(handle);
             return FALSE;
-        else
+        } else {
+            snd_mixer_close(handle);
             return TRUE;
+        }
     }
+
+    snd_mixer_close(handle);
 }
 
 void alsa_toggle_volume() {
@@ -106,13 +116,14 @@ void alsa_toggle_volume() {
 }
 
 gboolean check_audio_event(GIOChannel *source, GIOCondition condition, gpointer data) {
-    snd_ctl_t *ctl = (snd_ctl_t *) data;
+    struct data *args = (struct data *) data;
+
     snd_ctl_event_t *event;
     unsigned int mask;
     int err;
 
     snd_ctl_event_alloca(&event);
-    err = snd_ctl_read(ctl, event);
+    err = snd_ctl_read(args->ctl, event);
     if (err < 0)
         exit(EXIT_FAILURE); // maybe better if we just ignore with return TRUE
 
@@ -123,8 +134,8 @@ gboolean check_audio_event(GIOChannel *source, GIOCondition condition, gpointer 
     if (!(mask & SND_CTL_EVENT_MASK_VALUE))
         return TRUE;
 
-    watcher_volume_set_percentage(skeleton, alsa_get_volume());
-    watcher_volume_set_muted(skeleton, alsa_get_muted());
+    watcher_volume_set_percentage(args->skeleton, alsa_get_volume());
+    watcher_volume_set_muted(args->skeleton, alsa_get_muted());
     g_print("alsa event received\n");
 
     return TRUE;
@@ -149,8 +160,7 @@ static int open_ctl(const char *name, snd_ctl_t **ctlp) {
     return 0;
 }
 
-void start_volume_monitoring(WatcherVolume *skel) {
-    skeleton = skel;
+void start_volume_monitoring(WatcherVolume *skeleton) {
     snd_ctl_t *ctl;
     int err = 0;
 
@@ -163,8 +173,16 @@ void start_volume_monitoring(WatcherVolume *skel) {
     struct pollfd pfd;
     snd_ctl_poll_descriptors(ctl, &pfd, 1);
 
+    struct data *args = malloc(sizeof(struct data));
+    if (args == NULL) {
+        fprintf(stderr, "malloc in start_volume_monitoring() failed\n");
+        exit(EXIT_FAILURE);
+    }
+    args->ctl = ctl;
+    args->skeleton = skeleton;
+
     GIOChannel *channel = g_io_channel_unix_new(pfd.fd);
-    g_io_add_watch(channel, G_IO_IN, check_audio_event, ctl);
+    g_io_add_watch(channel, G_IO_IN, check_audio_event, args);
 
     g_print("monitoring alsa\n");
 
