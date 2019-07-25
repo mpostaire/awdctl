@@ -8,7 +8,7 @@ SRC= $(filter-out $(SDIR)/$(EXEC)-dbus.c, $(wildcard $(SDIR)/*.c))
 OBJ= $(SRC:$(SDIR)/%.c=$(ODIR)/%.o)
 OBJ+=$(ODIR)/$(EXEC)-dbus.o
 
-all: out $(ODIR)/$(EXEC)-dbus.[ch] $(EXEC)
+all: out $(ODIR)/$(EXEC)-dbus.o $(EXEC)
 
 $(EXEC): $(OBJ)
 	$(CC) -o $@ $^ $(CFLAGS) $(LDLIBS)
@@ -16,7 +16,7 @@ $(EXEC): $(OBJ)
 $(ODIR)/%.o: $(SDIR)/%.c
 	$(CC) -o $@ -c $< $(CFLAGS) $(LDLIBS)
 
-$(ODIR)/$(EXEC)-dbus.[ch]: fr.mpostaire.Watcher.xml
+$(ODIR)/$(EXEC)-dbus.o: fr.mpostaire.Watcher.xml
 	rm -rf $(EXEC)
 	gdbus-codegen --interface-prefix fr.mpostaire. --output-directory $(SDIR) --generate-c-code $(EXEC)-dbus fr.mpostaire.Watcher.xml
 	$(CC) -o $(ODIR)/$(EXEC)-dbus.o -c $(SDIR)/$(EXEC)-dbus.c $(CFLAGS) $(LDLIBS)

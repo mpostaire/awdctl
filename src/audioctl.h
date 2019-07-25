@@ -13,4 +13,6 @@ void alsa_set_volume(guint volume);
 
 void alsa_toggle_volume();
 
+void audioctl_close();
+
 #endif

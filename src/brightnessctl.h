@@ -12,4 +12,6 @@ void write_brightness(guint value);
 
 void start_brightness_monitoring(WatcherBrightness *skel);
 
+void brightnessctl_close();
+
 #endif

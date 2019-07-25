@@ -3,10 +3,8 @@
 #include <glib.h>
 #include <stdlib.h>
 
-struct data {
-    snd_ctl_t *ctl;
-    WatcherVolume *skeleton;
-};
+static WatcherVolume *volume_skeleton;
+static snd_ctl_t *ctl;
 
 long alsa_get_volume() {
     long min, max, vol;
@@ -116,14 +114,12 @@ void alsa_toggle_volume() {
 }
 
 gboolean check_audio_event(GIOChannel *source, GIOCondition condition, gpointer data) {
-    struct data *args = (struct data *) data;
-
     snd_ctl_event_t *event;
     unsigned int mask;
     int err;
 
     snd_ctl_event_alloca(&event);
-    err = snd_ctl_read(args->ctl, event);
+    err = snd_ctl_read(ctl, event);
     if (err < 0)
         exit(EXIT_FAILURE); // maybe better if we just ignore with return TRUE
 
@@ -134,8 +130,8 @@ gboolean check_audio_event(GIOChannel *source, GIOCondition condition, gpointer 
     if (!(mask & SND_CTL_EVENT_MASK_VALUE))
         return TRUE;
 
-    watcher_volume_set_percentage(args->skeleton, alsa_get_volume());
-    watcher_volume_set_muted(args->skeleton, alsa_get_muted());
+    watcher_volume_set_percentage(volume_skeleton, alsa_get_volume());
+    watcher_volume_set_muted(volume_skeleton, alsa_get_muted());
     g_print("alsa event received\n");
 
     return TRUE;
@@ -160,11 +156,15 @@ static int open_ctl(const char *name, snd_ctl_t **ctlp) {
     return 0;
 }
 
-void start_volume_monitoring(WatcherVolume *skeleton) {
-    snd_ctl_t *ctl;
-    int err = 0;
+void audioctl_close() {
+    // free everything that needs to be freed in audioctl here
+    snd_ctl_close(ctl);
+    g_object_unref(volume_skeleton);
+}
 
-    err = open_ctl("default", &ctl);
+void start_volume_monitoring(WatcherVolume *skeleton) {
+    volume_skeleton = skeleton;
+    int err = open_ctl("default", &ctl);
     if (err < 0) {
         snd_ctl_close(ctl);
         exit(EXIT_FAILURE);
@@ -173,16 +173,8 @@ void start_volume_monitoring(WatcherVolume *skeleton) {
     struct pollfd pfd;
     snd_ctl_poll_descriptors(ctl, &pfd, 1);
 
-    struct data *args = malloc(sizeof(struct data));
-    if (args == NULL) {
-        fprintf(stderr, "malloc in start_volume_monitoring() failed\n");
-        exit(EXIT_FAILURE);
-    }
-    args->ctl = ctl;
-    args->skeleton = skeleton;
-
     GIOChannel *channel = g_io_channel_unix_new(pfd.fd);
-    g_io_add_watch(channel, G_IO_IN, check_audio_event, args);
+    g_io_add_watch(channel, G_IO_IN, check_audio_event, NULL);
 
     g_print("monitoring alsa\n");
 

@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+static WatcherBrightness *brightness_skeleton;
 static GFile *brightness_file;
 static guint max_brightness;
 static char brightness_path[256], max_brightness_path[256];
@@ -21,6 +22,8 @@ void get_backlight_sysfs_path(char *brightness_path, char *max_brightness_path) 
 
     g_file_enumerator_close(enumerator, NULL, NULL);
     g_object_unref(enumerator);
+    g_object_unref(file);
+    g_object_unref(info);
 }
 
 guint get_max_brightness() { return max_brightness; }
@@ -79,7 +82,6 @@ void write_brightness(guint value) {
 }
 
 static void file_changed_cb(GFileMonitor *monitor, GFile *file, GFile *other, GFileMonitorEvent evtype, gpointer user_data) {
-    WatcherBrightness *skel = (WatcherBrightness *) user_data;
     char *fpath = g_file_get_path(file);
     char *opath = NULL;
     if (other) {
@@ -92,7 +94,7 @@ static void file_changed_cb(GFileMonitor *monitor, GFile *file, GFile *other, GF
     case G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT:
         g_print("%s set of changes done\n", fpath);
         guint brightness = read_brightness();
-        watcher_brightness_set_percentage(skel, (gfloat) brightness / max_brightness * 100);
+        watcher_brightness_set_percentage(brightness_skeleton, (gfloat) brightness / max_brightness * 100);
         g_print("brightness = %d\n", brightness);
         break;
     case G_FILE_MONITOR_EVENT_DELETED:
@@ -123,9 +125,14 @@ static void file_changed_cb(GFileMonitor *monitor, GFile *file, GFile *other, GF
     g_free(fpath);
 }
 
-void start_brightness_monitoring(WatcherBrightness *skeleton) {
-    get_backlight_sysfs_path(brightness_path, max_brightness_path);
+void brightnessctl_close() {
+    // free everything that needs to be freed in brightnessctl here
+    g_object_unref(brightness_skeleton);
+}
 
+void start_brightness_monitoring(WatcherBrightness *skeleton) {
+    brightness_skeleton = skeleton;
+    get_backlight_sysfs_path(brightness_path, max_brightness_path);
     brightness_file = g_file_new_for_path(brightness_path);
     assert(brightness_file);
 
@@ -139,7 +146,7 @@ void start_brightness_monitoring(WatcherBrightness *skeleton) {
         exit(EXIT_FAILURE);
     }
 
-    g_signal_connect(G_OBJECT(fm), "changed", G_CALLBACK(file_changed_cb), skeleton);
+    g_signal_connect(G_OBJECT(fm), "changed", G_CALLBACK(file_changed_cb), NULL);
 
     char *fpath = g_file_get_path(brightness_file);
     g_print("monitoring %s\n", fpath);

@@ -7,3 +7,4 @@
 *.o
 watcher-dbus.c
 watcher-dbus.h
+*.log

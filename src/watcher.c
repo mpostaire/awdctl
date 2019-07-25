@@ -1,10 +1,8 @@
 /*
  * TODO: daemonize this
- * TODO: check corner cases
  * TODO: check for errors return values where its possible
  * TODO: power saving features (timers to dim screen, etc...). Only do this if no alternatives. (check acpi)
- * TODO: ---> use user_data args to get rid of global variables
- * TODO: memory leak check
+ * TODO: memory leak check (clean everything at exit)
  * 
  * can add more interfaces to monitor more things in the future
  */
@@ -18,6 +16,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <glib-unix.h>
 
 static void on_handle_set_brightness(WatcherBrightness *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
     if (value < MIN_BRIGHTNESS_PERCENT || value > 100) {
@@ -184,17 +183,32 @@ static void on_name_lost(GDBusConnection *connection, const gchar *name, gpointe
     exit(EXIT_FAILURE);
 }
 
+static gboolean quit(gpointer user_data) {
+    GMainLoop *loop = (GMainLoop *) user_data;    
+    g_main_loop_quit(loop);
+    return FALSE;
+}
+
 int main(int argc, char **argv) {
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
     assert(loop);
 
-    // change to SESSION bus
-    g_bus_own_name(G_BUS_TYPE_SESSION, "fr.mpostaire.Watcher", G_BUS_NAME_OWNER_FLAGS_NONE, NULL,
+    g_unix_signal_add(SIGINT, quit, loop);
+    g_unix_signal_add(SIGHUP, quit, loop);
+    g_unix_signal_add(SIGTERM, quit, loop);
+
+    // TODO: change to SESSION bus
+    guint id = g_bus_own_name(G_BUS_TYPE_SESSION, "fr.mpostaire.Watcher", G_BUS_NAME_OWNER_FLAGS_NONE, NULL,
                    on_name_acquired, on_name_lost, NULL, NULL);
 
     g_main_loop_run(loop);
-
+    
+    // TODO: free and close everything here
+    g_print("exiting...\n");
+    g_bus_unown_name(id); // maybe useless
     g_main_loop_unref(loop);
+    audioctl_close();
+    brightnessctl_close();
 
     return EXIT_SUCCESS;
 }
