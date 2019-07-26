@@ -1,9 +1,9 @@
-#include "watcher-dbus.h"
+#include "awdctl-dbus.h"
 #include <alsa/asoundlib.h>
 #include <glib.h>
 #include <stdlib.h>
 
-static WatcherVolume *volume_skeleton;
+static AwdctlVolume *volume_skeleton;
 static snd_ctl_t *ctl;
 
 long alsa_get_volume() {
@@ -120,8 +120,10 @@ gboolean check_audio_event(GIOChannel *source, GIOCondition condition, gpointer 
 
     snd_ctl_event_alloca(&event);
     err = snd_ctl_read(ctl, event);
-    if (err < 0)
+    if (err < 0) {
+        fprintf(stderr, "check_audio_event() failed\n");
         exit(EXIT_FAILURE); // maybe better if we just ignore with return TRUE
+    }
 
     if (snd_ctl_event_get_type(event) != SND_CTL_EVENT_ELEM)
         return TRUE;
@@ -130,8 +132,8 @@ gboolean check_audio_event(GIOChannel *source, GIOCondition condition, gpointer 
     if (!(mask & SND_CTL_EVENT_MASK_VALUE))
         return TRUE;
 
-    watcher_volume_set_percentage(volume_skeleton, alsa_get_volume());
-    watcher_volume_set_muted(volume_skeleton, alsa_get_muted());
+    awdctl_volume_set_percentage(volume_skeleton, alsa_get_volume());
+    awdctl_volume_set_muted(volume_skeleton, alsa_get_muted());
     g_print("alsa event received\n");
 
     return TRUE;
@@ -162,11 +164,12 @@ void audioctl_close() {
     g_object_unref(volume_skeleton);
 }
 
-void start_volume_monitoring(WatcherVolume *skeleton) {
+void start_volume_monitoring(AwdctlVolume *skeleton) {
     volume_skeleton = skeleton;
     int err = open_ctl("default", &ctl);
     if (err < 0) {
         snd_ctl_close(ctl);
+        fprintf(stderr, "start_volume_monitoring() failed\n");
         exit(EXIT_FAILURE);
     }
 
@@ -179,6 +182,6 @@ void start_volume_monitoring(WatcherVolume *skeleton) {
     g_print("monitoring alsa\n");
 
     // update initial audio volume properties
-    watcher_volume_set_percentage(skeleton, alsa_get_volume());
-    watcher_volume_set_muted(skeleton, alsa_get_muted());
+    awdctl_volume_set_percentage(skeleton, alsa_get_volume());
+    awdctl_volume_set_muted(skeleton, alsa_get_muted());
 }

@@ -1,12 +1,12 @@
 #include "brightnessctl.h"
-#include "watcher-dbus.h"
+#include "awdctl-dbus.h"
 #include <assert.h>
 #include <gio/gio.h>
 #include <glib.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-static WatcherBrightness *brightness_skeleton;
+static AwdctlBrightness *brightness_skeleton;
 static GFile *brightness_file;
 static guint max_brightness;
 static char brightness_path[256], max_brightness_path[256];
@@ -94,7 +94,7 @@ static void file_changed_cb(GFileMonitor *monitor, GFile *file, GFile *other, GF
     case G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT:
         g_print("%s set of changes done\n", fpath);
         guint brightness = read_brightness();
-        watcher_brightness_set_percentage(brightness_skeleton, (gfloat) brightness / max_brightness * 100);
+        awdctl_brightness_set_percentage(brightness_skeleton, (gfloat) brightness / max_brightness * 100);
         g_print("brightness = %d\n", brightness);
         break;
     case G_FILE_MONITOR_EVENT_DELETED:
@@ -130,7 +130,7 @@ void brightnessctl_close() {
     g_object_unref(brightness_skeleton);
 }
 
-void start_brightness_monitoring(WatcherBrightness *skeleton) {
+void start_brightness_monitoring(AwdctlBrightness *skeleton) {
     brightness_skeleton = skeleton;
     get_backlight_sysfs_path(brightness_path, max_brightness_path);
     brightness_file = g_file_new_for_path(brightness_path);
@@ -156,6 +156,6 @@ void start_brightness_monitoring(WatcherBrightness *skeleton) {
     guint brightness = read_brightness();
     max_brightness = read_max_brightness();
     guint min_brightness = MIN_BRIGHTNESS_PERCENT / 100.0 * max_brightness;
-    watcher_brightness_set_percentage(skeleton, (gfloat) brightness / max_brightness * 100);
-    watcher_brightness_set_min_percentage(skeleton, MIN_BRIGHTNESS_PERCENT);
+    awdctl_brightness_set_percentage(skeleton, (gfloat) brightness / max_brightness * 100);
+    awdctl_brightness_set_min_percentage(skeleton, MIN_BRIGHTNESS_PERCENT);
 }
