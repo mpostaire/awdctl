@@ -5,6 +5,6 @@
 *.swp
 .vscode
 *.o
-watcher-dbus.c
-watcher-dbus.h
+awdctl-dbus.c
+awdctl-dbus.h
 *.log
