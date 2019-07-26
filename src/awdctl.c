@@ -1,5 +1,4 @@
 /*
- * TODO: daemonize this
  * TODO: check for errors return values where its possible
  * TODO: power saving features (timers to dim screen, etc...). Only do this if no alternatives. (check acpi)
  * 
