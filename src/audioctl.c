@@ -1,4 +1,5 @@
 #include "awdctl-dbus.h"
+#include "volume_mapping.h"
 #include <alsa/asoundlib.h>
 #include <glib.h>
 #include <stdlib.h>
@@ -6,8 +7,8 @@
 static AwdctlVolume *volume_skeleton;
 static snd_ctl_t *ctl;
 
-long alsa_get_volume() {
-    long min, max, vol;
+guint alsa_get_volume() {
+    long min, max;
     snd_mixer_t *handle;
     snd_mixer_selem_id_t *sid;
     const char *card = "default";
@@ -23,12 +24,11 @@ long alsa_get_volume() {
     snd_mixer_selem_id_set_name(sid, selem_name);
     snd_mixer_elem_t *elem = snd_mixer_find_selem(handle, sid);
 
-    snd_mixer_selem_get_playback_volume_range(elem, &min, &max);
-    snd_mixer_selem_get_playback_volume(elem, SND_MIXER_SCHN_MONO, &vol);
+    double vol = get_normalized_playback_volume(elem, SND_MIXER_SCHN_MONO);
 
     snd_mixer_close(handle);
 
-    return (gfloat) vol / max * 100;
+    return vol * 100;
 }
 
 void alsa_set_volume(guint volume) {
@@ -48,8 +48,7 @@ void alsa_set_volume(guint volume) {
     snd_mixer_selem_id_set_name(sid, selem_name);
     snd_mixer_elem_t *elem = snd_mixer_find_selem(handle, sid);
 
-    snd_mixer_selem_get_playback_volume_range(elem, &min, &max);
-    snd_mixer_selem_set_playback_volume_all(elem, volume * max / 100);
+    set_normalized_playback_volume(elem, SND_MIXER_SCHN_MONO, (double) ((double) volume / 100.0), 1);
 
     snd_mixer_close(handle);
 }
@@ -83,6 +82,7 @@ gboolean alsa_get_muted() {
     }
 
     snd_mixer_close(handle);
+    return FALSE;
 }
 
 void alsa_toggle_volume() {
