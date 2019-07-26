@@ -46,4 +46,4 @@ clean:
 cleaner: clean
 	rm -f $(EXEC) $(SDIR)/$(EXEC)-dbus.[ch]
 
-.PHONY: all clean cleaner
+.PHONY: all clean cleaner install uninstall run
