@@ -5,8 +5,8 @@
  * can add more interfaces to monitor more things in the future
  */
 #include "audioctl.h"
-#include "brightnessctl.h"
 #include "awdctl-dbus.h"
+#include "brightnessctl.h"
 #include <alsa/asoundlib.h>
 #include <assert.h>
 #include <gio/gio.h>
@@ -14,6 +14,7 @@
 #include <glib.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 static void on_handle_set_brightness(AwdctlBrightness *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
@@ -185,11 +186,21 @@ static gboolean quit(gpointer user_data) {
     return FALSE;
 }
 
+void usage() {
+    g_print("Usage: awdctl [OPTIONS]\n\
+  -d\t Launch as a daemon.\n");
+}
+
 int main(int argc, char **argv) {
-    int err = daemon(0, 0);
-    if (err == -1) {
-        fprintf(stderr, "failed to daemonize\n");
-        return EXIT_FAILURE;
+    if (argc > 1) {
+        if (strcmp("-d", argv[1]) == 0) {
+            if (daemon(0, 0) == -1) {
+                fprintf(stderr, "failed to daemonize\n");
+                return EXIT_FAILURE;
+            }
+        } else {
+            usage();
+        }
     }
 
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
