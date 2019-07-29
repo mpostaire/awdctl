@@ -4,6 +4,7 @@ This is a "swiss army knife" tool I made for my awesomewm widgets.
 
 ## Installation
 Clone this repository, cd in the cloned directory then use `make install`. To uninstall use `make uninstall`.
+This program depends on `glib2`, `alsa-lib` and `libmpdclient` so you may need to install these before.
 
 ## Usage
 Open a terminal and launch the program using the `awdctl` command.
@@ -23,3 +24,4 @@ You can now monitor/control the screen brightness, mpd and alsa volume using dbu
 - Figure out how to make it work as a systemd service.
 - Use `g_source_unref()` to free sources such as gio_add_watch etc...
 - Add support for mpd server password.
+- change current mpd dbus specification to follow mpris specification
