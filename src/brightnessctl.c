@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <gio/gio.h>
 #include <glib.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -11,7 +12,7 @@ static GFile *brightness_file;
 static guint max_brightness;
 static char brightness_path[256], max_brightness_path[256];
 
-void get_backlight_sysfs_path(char *brightness_path, char *max_brightness_path) {
+static void get_backlight_sysfs_path(char *brightness_path, char *max_brightness_path) {
     GFile *file = g_file_new_for_path("/sys/class/backlight");
     GFileEnumerator *enumerator = g_file_enumerate_children(file, G_FILE_ATTRIBUTE_STANDARD_NAME, G_FILE_QUERY_INFO_NONE, NULL, NULL);
     GFileInfo *info = g_file_enumerator_next_file(enumerator, NULL, NULL);
@@ -26,9 +27,7 @@ void get_backlight_sysfs_path(char *brightness_path, char *max_brightness_path) 
     g_object_unref(info);
 }
 
-guint get_max_brightness() { return max_brightness; }
-
-guint read_brightness_path(char *path) {
+static guint read_brightness_path(char *path) {
     GError *err = NULL;
 
     char *contents;
@@ -52,7 +51,7 @@ static guint read_brightness() {
     return read_brightness_path(brightness_path);
 }
 
-void write_brightness(guint value) {
+static void write_brightness(guint value) {
     GError *err = NULL;
     GFileOutputStream *stream = g_file_replace(brightness_file, NULL, FALSE, G_FILE_CREATE_NONE, NULL, &err);
     if (err) {
@@ -125,13 +124,90 @@ static void file_changed_cb(GFileMonitor *monitor, GFile *file, GFile *other, GF
     g_free(fpath);
 }
 
+static void on_handle_set_brightness(AwdctlBrightness *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
+    if (value < MIN_BRIGHTNESS_PERCENT || value > 100) {
+        g_dbus_method_invocation_return_error_literal(invocation, G_IO_ERROR, G_IO_ERROR_EXISTS, "input must be in interval: [MinPercentage, 100]");
+        awdctl_brightness_complete_set_brightness(skeleton, invocation);
+        return;
+    }
+
+    guint current_value = awdctl_brightness_get_percentage(skeleton);
+    if (value == current_value) {
+        awdctl_brightness_complete_set_brightness(skeleton, invocation);
+        return;
+    }
+
+    guint true_value = ceil(value / 100.0 * max_brightness);
+    write_brightness(true_value);
+    // awdctl_brightness_set_percentage(skeleton, value); // ici marche
+    g_print("brightness set to %d\n", true_value);
+
+    awdctl_brightness_complete_set_brightness(skeleton, invocation);
+}
+
+static void on_handle_inc_brightness(AwdctlBrightness *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
+    if (value <= 0) {
+        awdctl_brightness_complete_inc_brightness(skeleton, invocation);
+        return;
+    }
+
+    guint current_value = awdctl_brightness_get_percentage(skeleton);
+    guint target_value = current_value + value;
+    if (target_value > 100)
+        target_value = 100;
+
+    if (target_value == current_value) {
+        awdctl_brightness_complete_inc_brightness(skeleton, invocation);
+        return;
+    }
+
+    guint true_value = ceil(target_value / 100.0 * max_brightness);
+    write_brightness(true_value);
+    g_print("brightness set to %d\n", true_value);
+
+    awdctl_brightness_complete_inc_brightness(skeleton, invocation);
+}
+
+static void on_handle_dec_brightness(AwdctlBrightness *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
+    if (value <= 0) {
+        awdctl_brightness_complete_dec_brightness(skeleton, invocation);
+        return;
+    }
+
+    guint current_value = awdctl_brightness_get_percentage(skeleton);
+    gint target_value = current_value - value;
+    if (target_value < MIN_BRIGHTNESS_PERCENT)
+        target_value = MIN_BRIGHTNESS_PERCENT;
+
+    if (target_value == current_value) {
+        awdctl_brightness_complete_dec_brightness(skeleton, invocation);
+        return;
+    }
+
+    guint true_value = ceil(target_value / 100.0 * max_brightness);
+    write_brightness(true_value);
+    g_print("brightness set to %d\n", true_value);
+
+    awdctl_brightness_complete_dec_brightness(skeleton, invocation);
+}
+
 void brightnessctl_close() {
     // free everything that needs to be freed in brightnessctl here
     g_object_unref(brightness_skeleton);
 }
 
-void start_brightness_monitoring(AwdctlBrightness *skeleton) {
-    brightness_skeleton = skeleton;
+void brightnessctl_start(GDBusConnection *connection) {
+    // setup brightness interface
+    brightness_skeleton = awdctl_brightness_skeleton_new();
+
+    g_signal_connect(brightness_skeleton, "handle-set-brightness", G_CALLBACK(on_handle_set_brightness), NULL);
+    g_signal_connect(brightness_skeleton, "handle-inc-brightness", G_CALLBACK(on_handle_inc_brightness), NULL);
+    g_signal_connect(brightness_skeleton, "handle-dec-brightness", G_CALLBACK(on_handle_dec_brightness), NULL);
+
+    g_dbus_interface_skeleton_export(G_DBUS_INTERFACE_SKELETON(brightness_skeleton), connection,
+                                     "/fr/mpostaire/awdctl/Brightness", NULL);
+
+    // we can begin to monitor brightness
     get_backlight_sysfs_path(brightness_path, max_brightness_path);
     brightness_file = g_file_new_for_path(brightness_path);
     assert(brightness_file);
@@ -156,6 +232,6 @@ void start_brightness_monitoring(AwdctlBrightness *skeleton) {
     guint brightness = read_brightness();
     max_brightness = read_max_brightness();
     guint min_brightness = MIN_BRIGHTNESS_PERCENT / 100.0 * max_brightness;
-    awdctl_brightness_set_percentage(skeleton, (gfloat) brightness / max_brightness * 100);
-    awdctl_brightness_set_min_percentage(skeleton, MIN_BRIGHTNESS_PERCENT);
+    awdctl_brightness_set_percentage(brightness_skeleton, (gfloat) brightness / max_brightness * 100);
+    awdctl_brightness_set_min_percentage(brightness_skeleton, MIN_BRIGHTNESS_PERCENT);
 }

@@ -7,7 +7,7 @@
 static AwdctlVolume *volume_skeleton;
 static snd_ctl_t *ctl;
 
-guint alsa_get_volume() {
+static guint alsa_get_volume() {
     long min, max;
     snd_mixer_t *handle;
     snd_mixer_selem_id_t *sid;
@@ -31,7 +31,7 @@ guint alsa_get_volume() {
     return vol * 100;
 }
 
-void alsa_set_volume(guint volume) {
+static void alsa_set_volume(guint volume) {
     long min, max;
     snd_mixer_t *handle;
     snd_mixer_selem_id_t *sid;
@@ -53,7 +53,7 @@ void alsa_set_volume(guint volume) {
     snd_mixer_close(handle);
 }
 
-gboolean alsa_get_muted() {
+static gboolean alsa_get_muted() {
     snd_mixer_t *handle;
     snd_mixer_selem_id_t *sid;
     const char *card = "default";
@@ -85,7 +85,7 @@ gboolean alsa_get_muted() {
     return FALSE;
 }
 
-void alsa_toggle_volume() {
+static void alsa_toggle_volume() {
     snd_mixer_t *handle;
     snd_mixer_selem_id_t *sid;
     const char *card = "default";
@@ -113,7 +113,7 @@ void alsa_toggle_volume() {
     snd_mixer_close(handle);
 }
 
-gboolean check_audio_event(GIOChannel *source, GIOCondition condition, gpointer data) {
+static gboolean check_audio_event(GIOChannel *source, GIOCondition condition, gpointer data) {
     snd_ctl_event_t *event;
     unsigned int mask;
     int err;
@@ -158,14 +158,87 @@ static int open_ctl(const char *name, snd_ctl_t **ctlp) {
     return 0;
 }
 
+static void on_handle_set_volume(AwdctlVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
+    if (value < 0 || value > 100) {
+        g_dbus_method_invocation_return_error_literal(invocation, G_IO_ERROR, G_IO_ERROR_EXISTS, "input must be in interval: [MinPercentage, 100]");
+        awdctl_volume_complete_set_volume(skeleton, invocation);
+        return;
+    }
+
+    alsa_set_volume(value);
+    g_print("audio volume set to %d\n", value);
+
+    awdctl_volume_complete_set_volume(skeleton, invocation);
+}
+
+static void on_handle_inc_volume(AwdctlVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
+    if (value <= 0) {
+        awdctl_volume_complete_inc_volume(skeleton, invocation);
+        return;
+    }
+
+    guint current_value = awdctl_volume_get_percentage(skeleton);
+    guint target_value = current_value + value;
+    if (target_value > 100)
+        target_value = 100;
+
+    if (target_value == current_value) {
+        awdctl_volume_complete_inc_volume(skeleton, invocation);
+        return;
+    }
+
+    alsa_set_volume(target_value);
+    g_print("audio volume set to %d\n", target_value);
+
+    awdctl_volume_complete_inc_volume(skeleton, invocation);
+}
+
+static void on_handle_dec_volume(AwdctlVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
+    if (value <= 0) {
+        awdctl_volume_complete_dec_volume(skeleton, invocation);
+        return;
+    }
+
+    guint current_value = awdctl_volume_get_percentage(skeleton);
+    gint target_value = current_value - value;
+    if (target_value < 0)
+        target_value = 0;
+
+    if (target_value == current_value) {
+        awdctl_volume_complete_dec_volume(skeleton, invocation);
+        return;
+    }
+
+    alsa_set_volume(target_value);
+    g_print("audio volume set to %d\n", target_value);
+
+    awdctl_volume_complete_dec_volume(skeleton, invocation);
+}
+
+static void on_handle_toggle_volume(AwdctlVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
+    alsa_toggle_volume();
+    awdctl_volume_complete_toggle_volume(skeleton, invocation);
+}
+
 void audioctl_close() {
     // free everything that needs to be freed in audioctl here
     snd_ctl_close(ctl);
     g_object_unref(volume_skeleton);
 }
 
-void start_volume_monitoring(AwdctlVolume *skeleton) {
-    volume_skeleton = skeleton;
+void audioctl_start(GDBusConnection *connection) {
+    // setup volume interface
+    volume_skeleton = awdctl_volume_skeleton_new();
+
+    g_signal_connect(volume_skeleton, "handle-set-volume", G_CALLBACK(on_handle_set_volume), NULL);
+    g_signal_connect(volume_skeleton, "handle-inc-volume", G_CALLBACK(on_handle_inc_volume), NULL);
+    g_signal_connect(volume_skeleton, "handle-dec-volume", G_CALLBACK(on_handle_dec_volume), NULL);
+    g_signal_connect(volume_skeleton, "handle-toggle-volume", G_CALLBACK(on_handle_toggle_volume), NULL);
+
+    g_dbus_interface_skeleton_export(G_DBUS_INTERFACE_SKELETON(volume_skeleton), connection,
+                                     "/fr/mpostaire/awdctl/Volume", NULL);
+
+    // we can begin to monitor volume
     int err = open_ctl("default", &ctl);
     if (err < 0) {
         snd_ctl_close(ctl);
@@ -182,6 +255,6 @@ void start_volume_monitoring(AwdctlVolume *skeleton) {
     g_print("monitoring alsa\n");
 
     // update initial audio volume properties
-    awdctl_volume_set_percentage(skeleton, alsa_get_volume());
-    awdctl_volume_set_muted(skeleton, alsa_get_muted());
+    awdctl_volume_set_percentage(volume_skeleton, alsa_get_volume());
+    awdctl_volume_set_muted(volume_skeleton, alsa_get_muted());
 }

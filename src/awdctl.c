@@ -5,174 +5,29 @@
  * can add more interfaces to monitor more things in the future
  */
 #include "audioctl.h"
-#include "awdctl-dbus.h"
 #include "brightnessctl.h"
+#include "mpdctl.h"
 #include <alsa/asoundlib.h>
 #include <assert.h>
+#include <getopt.h>
 #include <gio/gio.h>
 #include <glib-unix.h>
 #include <glib.h>
-#include <math.h>
 #include <stdio.h>
-#include <string.h>
+#include <stdlib.h>
 #include <unistd.h>
 
-static void on_handle_set_brightness(AwdctlBrightness *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
-    if (value < MIN_BRIGHTNESS_PERCENT || value > 100) {
-        g_dbus_method_invocation_return_error_literal(invocation, G_IO_ERROR, G_IO_ERROR_EXISTS, "input must be in interval: [MinPercentage, 100]");
-        awdctl_brightness_complete_set_brightness(skeleton, invocation);
-        return;
-    }
-
-    guint current_value = awdctl_brightness_get_percentage(skeleton);
-    if (value == current_value) {
-        awdctl_brightness_complete_set_brightness(skeleton, invocation);
-        return;
-    }
-
-    guint true_value = ceil(value / 100.0 * get_max_brightness());
-    write_brightness(true_value);
-    // awdctl_brightness_set_percentage(skeleton, value); // ici marche
-    g_print("brightness set to %d\n", true_value);
-
-    awdctl_brightness_complete_set_brightness(skeleton, invocation);
-}
-
-static void on_handle_inc_brightness(AwdctlBrightness *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
-    if (value <= 0) {
-        awdctl_brightness_complete_inc_brightness(skeleton, invocation);
-        return;
-    }
-
-    guint current_value = awdctl_brightness_get_percentage(skeleton);
-    guint target_value = current_value + value;
-    if (target_value > 100)
-        target_value = 100;
-
-    if (target_value == current_value) {
-        awdctl_brightness_complete_inc_brightness(skeleton, invocation);
-        return;
-    }
-
-    guint true_value = ceil(target_value / 100.0 * get_max_brightness());
-    write_brightness(true_value);
-    g_print("brightness set to %d\n", true_value);
-
-    awdctl_brightness_complete_inc_brightness(skeleton, invocation);
-}
-
-static void on_handle_dec_brightness(AwdctlBrightness *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
-    if (value <= 0) {
-        awdctl_brightness_complete_dec_brightness(skeleton, invocation);
-        return;
-    }
-
-    guint current_value = awdctl_brightness_get_percentage(skeleton);
-    gint target_value = current_value - value;
-    if (target_value < MIN_BRIGHTNESS_PERCENT)
-        target_value = MIN_BRIGHTNESS_PERCENT;
-
-    if (target_value == current_value) {
-        awdctl_brightness_complete_dec_brightness(skeleton, invocation);
-        return;
-    }
-
-    guint true_value = ceil(target_value / 100.0 * get_max_brightness());
-    write_brightness(true_value);
-    g_print("brightness set to %d\n", true_value);
-
-    awdctl_brightness_complete_dec_brightness(skeleton, invocation);
-}
-
-static void on_handle_set_volume(AwdctlVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
-    if (value < 0 || value > 100) {
-        g_dbus_method_invocation_return_error_literal(invocation, G_IO_ERROR, G_IO_ERROR_EXISTS, "input must be in interval: [MinPercentage, 100]");
-        awdctl_volume_complete_set_volume(skeleton, invocation);
-        return;
-    }
-
-    alsa_set_volume(value);
-    g_print("audio volume set to %d\n", value);
-
-    awdctl_volume_complete_set_volume(skeleton, invocation);
-}
-
-static void on_handle_inc_volume(AwdctlVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
-    if (value <= 0) {
-        awdctl_volume_complete_inc_volume(skeleton, invocation);
-        return;
-    }
-
-    guint current_value = awdctl_volume_get_percentage(skeleton);
-    guint target_value = current_value + value;
-    if (target_value > 100)
-        target_value = 100;
-
-    if (target_value == current_value) {
-        awdctl_volume_complete_inc_volume(skeleton, invocation);
-        return;
-    }
-
-    alsa_set_volume(target_value);
-    g_print("audio volume set to %d\n", target_value);
-
-    awdctl_volume_complete_inc_volume(skeleton, invocation);
-}
-
-static void on_handle_dec_volume(AwdctlVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
-    if (value <= 0) {
-        awdctl_volume_complete_dec_volume(skeleton, invocation);
-        return;
-    }
-
-    guint current_value = awdctl_volume_get_percentage(skeleton);
-    gint target_value = current_value - value;
-    if (target_value < 0)
-        target_value = 0;
-
-    if (target_value == current_value) {
-        awdctl_volume_complete_dec_volume(skeleton, invocation);
-        return;
-    }
-
-    alsa_set_volume(target_value);
-    g_print("audio volume set to %d\n", target_value);
-
-    awdctl_volume_complete_dec_volume(skeleton, invocation);
-}
-
-static void on_handle_toggle_volume(AwdctlVolume *skeleton, GDBusMethodInvocation *invocation, guint value, gpointer user_data) {
-    alsa_toggle_volume();
-    awdctl_volume_complete_toggle_volume(skeleton, invocation);
-}
+static int no_mpd = 0, no_alsa = 0, no_brightness = 0, daemonize = 0;
 
 static void on_name_acquired(GDBusConnection *connection, const gchar *name, gpointer user_data) {
-    // setup brightness interface
-    AwdctlBrightness *brightness_skeleton = awdctl_brightness_skeleton_new();
+    if (!no_brightness)
+        brightnessctl_start(connection);
 
-    g_signal_connect(brightness_skeleton, "handle-set-brightness", G_CALLBACK(on_handle_set_brightness), NULL);
-    g_signal_connect(brightness_skeleton, "handle-inc-brightness", G_CALLBACK(on_handle_inc_brightness), NULL);
-    g_signal_connect(brightness_skeleton, "handle-dec-brightness", G_CALLBACK(on_handle_dec_brightness), NULL);
+    if (!no_alsa)
+        audioctl_start(connection);
 
-    g_dbus_interface_skeleton_export(G_DBUS_INTERFACE_SKELETON(brightness_skeleton), connection,
-                                     "/fr/mpostaire/awdctl/Brightness", NULL);
-
-    // we can begin to monitor brightness
-    start_brightness_monitoring(brightness_skeleton);
-
-    // setup volume interface
-    AwdctlVolume *volume_skeleton = awdctl_volume_skeleton_new();
-
-    g_signal_connect(volume_skeleton, "handle-set-volume", G_CALLBACK(on_handle_set_volume), NULL);
-    g_signal_connect(volume_skeleton, "handle-inc-volume", G_CALLBACK(on_handle_inc_volume), NULL);
-    g_signal_connect(volume_skeleton, "handle-dec-volume", G_CALLBACK(on_handle_dec_volume), NULL);
-    g_signal_connect(volume_skeleton, "handle-toggle-volume", G_CALLBACK(on_handle_toggle_volume), NULL);
-
-    g_dbus_interface_skeleton_export(G_DBUS_INTERFACE_SKELETON(volume_skeleton), connection,
-                                     "/fr/mpostaire/awdctl/Volume", NULL);
-
-    // we can begin to monitor volume
-    start_volume_monitoring(volume_skeleton);
+    if (!no_mpd)
+        mpdctl_start(connection);
 }
 
 static void on_name_lost(GDBusConnection *connection, const gchar *name, gpointer user_data) {
@@ -186,23 +41,7 @@ static gboolean quit(gpointer user_data) {
     return FALSE;
 }
 
-void usage() {
-    g_print("Usage: awdctl [OPTIONS]\n\
-  -d\t Launch as a daemon.\n");
-}
-
-int main(int argc, char **argv) {
-    if (argc > 1) {
-        if (strcmp("-d", argv[1]) == 0) {
-            if (daemon(0, 0) == -1) {
-                fprintf(stderr, "failed to daemonize\n");
-                return EXIT_FAILURE;
-            }
-        } else {
-            usage();
-        }
-    }
-
+static void start_monitoring() {
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
     assert(loop);
 
@@ -219,8 +58,64 @@ int main(int argc, char **argv) {
     g_print("exiting...\n");
     g_bus_unown_name(id); // maybe useless
     g_main_loop_unref(loop);
-    audioctl_close();
-    brightnessctl_close();
+
+    if (!no_alsa)
+        audioctl_close();
+    if (!no_brightness)
+        brightnessctl_close();
+    if (!no_mpd)
+        mpdctl_close();
+}
+
+static void usage() {
+    g_print("Usage: awdctl [OPTIONS]\n\
+  -d, --daemon\t\tLaunch as a daemon.\n\
+  -h, --help\t\tShow this message.\n\
+  --no-mpd\t\tDisable mpd monitoring and dbus interface.\n\
+  --no-alsa\t\tDisable alsa monitoring and dbus interface.\n\
+  --no-brightness\tDisable brightness monitoring and dbus interface.\n");
+}
+
+int main(int argc, char **argv) {
+    int opt, opt_index;
+    struct option long_options[] = {
+        {"daemon", no_argument, NULL, 'd'},
+        {"help", no_argument, NULL, 'h'},
+        {"no-mpd", no_argument, &no_mpd, 1},
+        {"no-alsa", no_argument, &no_alsa, 1},
+        {"no-brightness", no_argument, &no_brightness, 1},
+        {NULL, 0, NULL, 0}};
+
+    while ((opt = getopt_long(argc, argv, "hd", long_options, &opt_index)) != -1) {
+        switch (opt) {
+        case 0:
+            break;
+        case 'd':
+            daemonize = 1;
+            break;
+        case 'h':
+            usage();
+            return EXIT_SUCCESS;
+            break;
+        default:
+            usage();
+            return EXIT_FAILURE;
+        }
+    }
+
+    if (no_alsa && no_mpd && no_brightness) {
+        g_print("There is nothing to monitor, exiting now.\n");
+        return EXIT_SUCCESS;
+    }
+
+    if (daemonize) {
+        if (daemon(0, 0) == -1) {
+            fprintf(stderr, "failed to daemonize\n");
+            return EXIT_FAILURE;
+        }
+    }
+
+    start_monitoring();
 
     return EXIT_SUCCESS;
 }

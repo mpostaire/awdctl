@@ -1,7 +1,7 @@
 SDIR=src
 ODIR=out
-CFLAGS=`pkg-config --cflags gio-2.0 gio-unix-2.0 glib-2.0 alsa`
-LDLIBS=`pkg-config --libs gio-2.0 gio-unix-2.0 glib-2.0 alsa` -lm
+CFLAGS=`pkg-config --cflags gio-2.0 gio-unix-2.0 glib-2.0 alsa libmpdclient`
+LDLIBS=`pkg-config --libs gio-2.0 gio-unix-2.0 glib-2.0 alsa libmpdclient` -lm
 CC=gcc
 EXEC=awdctl
 SRC= $(filter-out $(SDIR)/$(EXEC)-dbus.c, $(wildcard $(SDIR)/*.c))
@@ -18,13 +18,13 @@ $(ODIR)/%.o: $(SDIR)/%.c
 
 $(ODIR)/$(EXEC)-dbus.o: $(SDIR)/$(EXEC)-dbus.c $(SDIR)/$(EXEC)-dbus.h
 	rm -rf $(EXEC)
-	$(CC) -o $(ODIR)/$(EXEC)-dbus.o -c $(SDIR)/$(EXEC)-dbus.c $(CFLAGS) $(LDLIBS)
+	$(CC) -o $@ -c $< $(CFLAGS) $(LDLIBS)
 
 $(SDIR)/$(EXEC)-dbus.c: fr.mpostaire.$(EXEC).xml
-	gdbus-codegen --interface-prefix fr.mpostaire. --body --output $@ fr.mpostaire.$(EXEC).xml
+	gdbus-codegen --interface-prefix fr.mpostaire. --body --output $@ $^
 
 $(SDIR)/$(EXEC)-dbus.h: fr.mpostaire.$(EXEC).xml
-	gdbus-codegen --interface-prefix fr.mpostaire. --header --output $@ fr.mpostaire.$(EXEC).xml
+	gdbus-codegen --interface-prefix fr.mpostaire. --header --output $@ $^
 
 out:
 	mkdir $@

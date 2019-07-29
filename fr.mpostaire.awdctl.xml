@@ -27,4 +27,22 @@
         <property name="Percentage" type="u" access="read" />
         <property name="Muted" type="b" access="read" />
     </interface>
+        <interface name="fr.mpostaire.awdctl.Mpd">
+        <method name="TogglePause" />
+        <method name="Previous" />
+        <method name="Next" />
+        <method name="Stop" />
+        <method name="Play" />
+        <method name="ToggleRepeat" />
+        <method name="ToggleRandom" />
+        <property name="PlayState" type="u" access="read" />
+        <property name="Length" type="u" access="read" />
+        <property name="Repeat" type="b" access="read" />
+        <property name="Random" type="b" access="read" />
+        <property name="Volume" type="u" access="read" />
+        <property name="Title" type="s" access="read" />
+        <property name="Artist" type="s" access="read" />
+        <property name="Album" type="s" access="read" />
+        <property name="Path" type="s" access="read" />
+    </interface>
 </node>
