@@ -1,6 +1,5 @@
 # awdctl
-Monitoring program I use to control my laptop's screen brightness, mpd and alsa volume via dbus.
-This is a "swiss army knife" tool I made for my awesomewm widgets.
+Monitoring program I use to control my laptop's screen brightness and alsa volume via dbus.
 
 ## Installation
 Clone this repository, cd in the cloned directory then use `make install`. To uninstall use `make uninstall`.
