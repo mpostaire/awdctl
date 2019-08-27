@@ -5,7 +5,9 @@
 
 #define MIN_BRIGHTNESS_PERCENT 10
 
-void brightnessctl_start(GDBusConnection *connection);
+void brightnessctl_export(GDBusConnection *connection);
+
+void brightnessctl_start();
 
 void brightnessctl_close();
 

@@ -3,7 +3,9 @@
 
 #include <gio/gio.h>
 
-void audioctl_start(GDBusConnection *connection);
+void audioctl_export(GDBusConnection *connection);
+
+void audioctl_start();
 
 void audioctl_close();
 

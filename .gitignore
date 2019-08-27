@@ -8,3 +8,4 @@
 awdctl-dbus.c
 awdctl-dbus.h
 *.log
+*.supp

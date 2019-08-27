@@ -196,7 +196,7 @@ void brightnessctl_close() {
     g_object_unref(brightness_skeleton);
 }
 
-void brightnessctl_start(GDBusConnection *connection) {
+void brightnessctl_export(GDBusConnection *connection) {
     // setup brightness interface
     brightness_skeleton = awdctl_brightness_skeleton_new();
 
@@ -206,7 +206,9 @@ void brightnessctl_start(GDBusConnection *connection) {
 
     g_dbus_interface_skeleton_export(G_DBUS_INTERFACE_SKELETON(brightness_skeleton), connection,
                                      "/fr/mpostaire/awdctl/Brightness", NULL);
+}
 
+void brightnessctl_start() {
     // we can begin to monitor brightness
     get_backlight_sysfs_path(brightness_path, max_brightness_path);
     brightness_file = g_file_new_for_path(brightness_path);

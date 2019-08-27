@@ -6,7 +6,6 @@
  */
 #include "audioctl.h"
 #include "brightnessctl.h"
-#include "mpdctl.h"
 #include <alsa/asoundlib.h>
 #include <assert.h>
 #include <getopt.h>
@@ -17,17 +16,23 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-static int no_mpd = 0, no_alsa = 0, no_brightness = 0, daemonize = 0;
+static int no_alsa = 0, no_brightness = 0, daemonize = 0;
+
+static void on_bus_acquired(GDBusConnection *connection, const gchar *name, gpointer user_data) {
+    if (!no_brightness)
+        brightnessctl_export(connection);
+
+    if (!no_alsa)
+        audioctl_export(connection);
+}
+
 
 static void on_name_acquired(GDBusConnection *connection, const gchar *name, gpointer user_data) {
     if (!no_brightness)
-        brightnessctl_start(connection);
+        brightnessctl_start();
 
     if (!no_alsa)
-        audioctl_start(connection);
-
-    if (!no_mpd)
-        mpdctl_start(connection);
+        audioctl_start();
 }
 
 static void on_name_lost(GDBusConnection *connection, const gchar *name, gpointer user_data) {
@@ -42,6 +47,11 @@ static gboolean quit(gpointer user_data) {
 }
 
 static void start_monitoring() {
+    if (no_alsa && no_brightness) {
+        g_print("There is nothing to monitor, exiting now.\n");
+        exit(EXIT_SUCCESS);
+    }
+
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
     assert(loop);
 
@@ -49,7 +59,7 @@ static void start_monitoring() {
     // g_unix_signal_add(SIGHUP, quit, loop); // should reload config file but there is none yet
     g_unix_signal_add(SIGTERM, quit, loop);
 
-    guint id = g_bus_own_name(G_BUS_TYPE_SESSION, "fr.mpostaire.awdctl", G_BUS_NAME_OWNER_FLAGS_NONE, NULL,
+    guint id = g_bus_own_name(G_BUS_TYPE_SESSION, "fr.mpostaire.awdctl", G_BUS_NAME_OWNER_FLAGS_NONE, on_bus_acquired,
                               on_name_acquired, on_name_lost, NULL, NULL);
 
     g_main_loop_run(loop);
@@ -63,15 +73,12 @@ static void start_monitoring() {
         audioctl_close();
     if (!no_brightness)
         brightnessctl_close();
-    if (!no_mpd)
-        mpdctl_close();
 }
 
 static void usage() {
     g_print("Usage: awdctl [OPTIONS]\n\
   -d, --daemon\t\tLaunch as a daemon.\n\
   -h, --help\t\tShow this message.\n\
-  --no-mpd\t\tDisable mpd monitoring and dbus interface.\n\
   --no-alsa\t\tDisable alsa monitoring and dbus interface.\n\
   --no-brightness\tDisable brightness monitoring and dbus interface.\n");
 }
@@ -81,7 +88,6 @@ int main(int argc, char **argv) {
     struct option long_options[] = {
         {"daemon", no_argument, NULL, 'd'},
         {"help", no_argument, NULL, 'h'},
-        {"no-mpd", no_argument, &no_mpd, 1},
         {"no-alsa", no_argument, &no_alsa, 1},
         {"no-brightness", no_argument, &no_brightness, 1},
         {NULL, 0, NULL, 0}};
@@ -96,16 +102,10 @@ int main(int argc, char **argv) {
         case 'h':
             usage();
             return EXIT_SUCCESS;
-            break;
         default:
             usage();
             return EXIT_FAILURE;
         }
-    }
-
-    if (no_alsa && no_mpd && no_brightness) {
-        g_print("There is nothing to monitor, exiting now.\n");
-        return EXIT_SUCCESS;
     }
 
     if (daemonize) {

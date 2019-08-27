@@ -226,7 +226,7 @@ void audioctl_close() {
     g_object_unref(volume_skeleton);
 }
 
-void audioctl_start(GDBusConnection *connection) {
+void audioctl_export(GDBusConnection *connection) {
     // setup volume interface
     volume_skeleton = awdctl_volume_skeleton_new();
 
@@ -237,7 +237,9 @@ void audioctl_start(GDBusConnection *connection) {
 
     g_dbus_interface_skeleton_export(G_DBUS_INTERFACE_SKELETON(volume_skeleton), connection,
                                      "/fr/mpostaire/awdctl/Volume", NULL);
+}
 
+void audioctl_start() {
     // we can begin to monitor volume
     int err = open_ctl("default", &ctl);
     if (err < 0) {

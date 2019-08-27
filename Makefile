@@ -1,7 +1,7 @@
 SDIR=src
 ODIR=out
-CFLAGS=`pkg-config --cflags gio-2.0 gio-unix-2.0 glib-2.0 alsa libmpdclient`
-LDLIBS=`pkg-config --libs gio-2.0 gio-unix-2.0 glib-2.0 alsa libmpdclient` -lm
+CFLAGS=`pkg-config --cflags gio-2.0 gio-unix-2.0 glib-2.0 alsa`
+LDLIBS=`pkg-config --libs gio-2.0 gio-unix-2.0 glib-2.0 alsa` -lm
 CC=gcc
 EXEC=awdctl
 SRC= $(filter-out $(SDIR)/$(EXEC)-dbus.c, $(wildcard $(SDIR)/*.c))
