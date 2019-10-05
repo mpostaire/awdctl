@@ -48,7 +48,13 @@ static void alsa_set_volume(guint volume) {
     snd_mixer_selem_id_set_name(sid, selem_name);
     snd_mixer_elem_t *elem = snd_mixer_find_selem(handle, sid);
 
-    set_normalized_playback_volume(elem, SND_MIXER_SCHN_MONO, (double) ((double) volume / 100.0), 1);
+    double true_volume = (double) ((double) volume / 100.0);
+    
+	for (snd_mixer_selem_channel_id_t chn = 0; chn < 32; chn++) {
+		if (!snd_mixer_selem_has_playback_channel(elem, chn))
+			continue;
+		set_normalized_playback_volume(elem, chn, true_volume, 1);
+	}
 
     snd_mixer_close(handle);
 }
