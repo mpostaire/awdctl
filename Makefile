@@ -34,11 +34,11 @@ run: all
 
 install: all backlight.rules
 	install -m 0755 $(EXEC) /usr/bin/
-	install -m 0644 backlight.rules /etc/udev/rules.d/
+	install -m 0644 backlight.rules /lib/udev/rules.d/
 
 uninstall:
 	rm -f /usr/bin/$(EXEC)
-	rm -f /usr/bin/$(EXEC) /etc/udev/rules.d/backlight.rules
+	rm -f /usr/bin/$(EXEC) /lib/udev/rules.d/backlight.rules
 
 clean:
 	rm -f $(OBJ)
